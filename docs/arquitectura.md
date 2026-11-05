@@ -27,7 +27,7 @@ Técnicos de servicio realizan visitas en zonas rurales con conectividad intermi
 
 ### PWA offline-first con API REST
 
-La interfaz se entrega como archivos web estáticos desde Node.js. El manifiesto declara el nombre, iconos, colores, alcance y modo `standalone`. El Service Worker instala el shell de la aplicación, resuelve navegación desde caché si la red falla y mantiene actualizados los recursos estáticos. No intercepta ni guarda respuestas de `/api/`.
+La interfaz se entrega como archivos estáticos en Vercel. El manifiesto declara el nombre, iconos, colores, alcance y modo `standalone`. El Service Worker instala el shell de la aplicación, resuelve navegación desde caché si la red falla y mantiene actualizados los recursos estáticos. No intercepta ni guarda respuestas de `/api/`.
 
 El formulario escribe primero un registro en IndexedDB. Solo después de que la transacción local termina confirma al usuario que el reporte quedó guardado. La cola se envía a `POST /api/reports` cuando hay conexión. El UUID del cliente funciona como clave idempotente: repetir el POST devuelve el reporte existente. Al cargar, la aplicación combina los registros del servidor con los del dispositivo y conserva los pendientes locales.
 
@@ -36,10 +36,10 @@ Técnico
   └─ PWA instalada o pestaña HTTPS
        ├─ HTML/CSS/JS + Service Worker → Cache Storage (shell offline)
        ├─ Reportes locales → IndexedDB (cola y vista inmediata)
-       └─ HTTPS → API REST Node → data/reports.json (prototipo persistente)
+       └─ HTTPS → Funciones API Vercel → Supabase PostgREST → PostgreSQL
 ```
 
-La API guarda el archivo JSON en disco en el servidor; IndexedDB almacena el mismo reporte más el estado de sincronización, únicamente en el origen y navegador de ese dispositivo.
+En Vercel, la base Supabase conserva los reportes. `server.mjs` solo ofrece un modo local de desarrollo con `data/reports.json`; no debe usarse como persistencia en funciones serverless. IndexedDB almacena el mismo reporte más el estado de sincronización, únicamente en el origen y navegador de ese dispositivo.
 
 ### Ciclo offline y sincronización
 
@@ -47,7 +47,7 @@ La API guarda el archivo JSON en disco en el servidor; IndexedDB almacena el mis
 2. El formulario crea un identificador y guarda el reporte en IndexedDB como `pending`.
 3. Sin conexión, el listado y el formulario continúan disponibles; no se inicia una petición de API.
 4. Con conexión, la aplicación intenta enviar reportes pendientes, incluso al pulsar **Sincronizar** o al volver a abrirla.
-5. Un `201` o una respuesta idempotente `200` confirma el envío local como `synced`. Ante error, conserva el reporte pendiente y lo informa.
+5. Una respuesta exitosa de la función API confirma el envío local como `synced`. El ID del reporte es clave primaria en Supabase, así los reintentos no crean duplicados. Ante error, conserva el reporte pendiente y lo informa.
 
 La app no usa Background Sync porque su compatibilidad no es uniforme (especialmente en Safari/iOS). En iOS, el usuario puede necesitar reabrir la app o pulsar sincronizar. El registro offline nunca depende de que una tarea en segundo plano se ejecute.
 
@@ -119,7 +119,7 @@ El servidor es una implementación Node.js sin dependencias externas. En `localh
 
 ### Pruebas de aceptación reproducibles
 
-1. **API:** `GET /api/health` responde `{"status":"ok"}`; `GET /api/reports` responde una lista JSON; crear un reporte con POST devuelve `201`, y repetir el mismo identificador devuelve `200` sin duplicarlo.
+1. **API:** `GET /api/health` responde `{"status":"ok"}`; `GET /api/reports` responde una lista JSON; en el servidor local de demostración, el primer POST devuelve `201` y repetirlo devuelve `200`. En Vercel la función usa upsert idempotente en Supabase.
 2. **Validación:** campos requeridos vacíos, prioridad desconocida, fecha inválida y texto superior al límite son rechazados.
 3. **Offline:** visitar primero en línea, activar offline desde DevTools o modo avión, recargar, llenar y guardar un reporte; verificar que queda como pendiente y permanece en IndexedDB.
 4. **Sincronización:** recuperar red; verificar que el reporte pasa a enviado y aparece una sola vez en `GET /api/reports`.
@@ -128,6 +128,18 @@ El servidor es una implementación Node.js sin dependencias externas. En `localh
 
 ## 6. Despliegue, privacidad y evolución
 
-`render.yaml` describe un servicio Node con health check y un disco persistente para el JSON. Conecta el repositorio como Blueprint en Render; la plataforma entrega HTTPS en el dominio del servicio. El disco requiere un plan de Render que lo admita. El archivo JSON solo es apropiado para demostración en una instancia; no resuelve concurrencia entre procesos ni operaciones de equipo.
+### Vercel + Supabase
+
+Vercel sirve la PWA estática y las funciones de `api/reports.mjs` y `api/health.mjs`. La función conecta a Supabase PostgREST con `SUPABASE_URL` y `SUPABASE_SECRET_KEY`, configuradas como secretos de entorno en Vercel (también se acepta `SUPABASE_SERVICE_ROLE_KEY` para la clave legacy). La clave se envía en el encabezado `apikey` y solo se consulta en ejecución de servidor; nunca se incluye en el JavaScript enviado al navegador.
+
+Pasos de preparación:
+
+1. Crear un proyecto Supabase y ejecutar `supabase/schema.sql` desde SQL Editor.
+2. Obtener Project URL y Secret key (`sb_secret_...`) desde la configuración del proyecto Supabase.
+3. Importar el repositorio GitHub en Vercel y dejar la raíz como raíz del proyecto; no requiere framework ni compilación.
+4. Añadir `SUPABASE_URL` y `SUPABASE_SECRET_KEY` en las variables de entorno para cada ambiente y desplegar.
+5. Comprobar `/api/health`, guardar un reporte de prueba y consultarlo en `/api/reports`.
+
+Los niveles gratuitos tienen cuotas, límites y políticas que pueden cambiar; no prometer disponibilidad/capacidad ilimitadas. Las funciones públicas no implementan autenticación y permiten consultar/crear reportes a cualquiera que tenga la URL. RLS no sustituye autenticación en este diseño porque la API usa una clave privilegiada; usar únicamente datos ficticios hasta añadir autorización.
 
 Para producción real: migrar el repositorio de reportes a una base de datos administrada con índices y política de copias de seguridad; añadir autenticación/autorización, validación de roles, auditoría, cifrado/transporte, política de retención y respuesta ante conflictos. Diseñar explícitamente el acceso multiusuario antes de almacenar datos personales. IndexedDB pertenece al navegador/origen que lo creó y no es respaldo ni mecanismo de intercambio entre técnicos.

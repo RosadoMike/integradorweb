@@ -1,7 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { normalizeReport, startServer } from './server.mjs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { normalizeReport } from './report-validation.mjs';
+import { startServer } from './server.mjs';
+import { listReports, saveReport } from './lib/supabase.mjs';
 
 const validReport = {
   id: 'report-1',
@@ -39,8 +44,88 @@ test('rechaza fecha no válida', () => {
   assert.throws(() => normalizeReport({ ...validReport, createdAt: 'ayer' }), /fecha/);
 });
 
+test('el adaptador Supabase transforma filas y usa inserción idempotente', async (context) => {
+  const previousUrl = process.env.SUPABASE_URL;
+  const previousKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const previousSecretKey = process.env.SUPABASE_SECRET_KEY;
+  const previousFetch = globalThis.fetch;
+  process.env.SUPABASE_URL = 'https://campolisto-test.supabase.co';
+  process.env.SUPABASE_SECRET_KEY = 'test-secret';
+  delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+  let insertedRow;
+
+  context.after(() => {
+    if (previousUrl === undefined) delete process.env.SUPABASE_URL;
+    else process.env.SUPABASE_URL = previousUrl;
+    if (previousKey === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    else process.env.SUPABASE_SERVICE_ROLE_KEY = previousKey;
+    if (previousSecretKey === undefined) delete process.env.SUPABASE_SECRET_KEY;
+    else process.env.SUPABASE_SECRET_KEY = previousSecretKey;
+    globalThis.fetch = previousFetch;
+  });
+
+  globalThis.fetch = async (url, options) => {
+    assert.match(url, /\/rest\/v1\/reports/);
+    assert.equal(options.headers.apikey, 'test-secret');
+    assert.equal(options.headers.Authorization, undefined);
+    assert.equal(options.headers.Prefer, 'resolution=ignore-duplicates,return=representation');
+    insertedRow = JSON.parse(options.body);
+    return new Response(JSON.stringify([{
+      ...insertedRow,
+      service_type: insertedRow.service_type,
+      created_at: insertedRow.created_at
+    }]), { status: 201, headers: { 'Content-Type': 'application/json' } });
+  };
+
+  const saved = await saveReport({ ...validReport, id: `supabase-${randomUUID()}` });
+  assert.equal(insertedRow.service_type, validReport.serviceType);
+  assert.equal(saved.serviceType, validReport.serviceType);
+  assert.equal(saved.syncState, 'synced');
+});
+
+test('el adaptador Supabase transforma las filas consultadas al formato de la app', async (context) => {
+  const previousUrl = process.env.SUPABASE_URL;
+  const previousKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const previousSecretKey = process.env.SUPABASE_SECRET_KEY;
+  const previousFetch = globalThis.fetch;
+  process.env.SUPABASE_URL = 'https://campolisto-test.supabase.co';
+  process.env.SUPABASE_SECRET_KEY = 'test-secret';
+  delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+  context.after(() => {
+    if (previousUrl === undefined) delete process.env.SUPABASE_URL;
+    else process.env.SUPABASE_URL = previousUrl;
+    if (previousKey === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    else process.env.SUPABASE_SERVICE_ROLE_KEY = previousKey;
+    if (previousSecretKey === undefined) delete process.env.SUPABASE_SECRET_KEY;
+    else process.env.SUPABASE_SECRET_KEY = previousSecretKey;
+    globalThis.fetch = previousFetch;
+  });
+  globalThis.fetch = async (url, options) => {
+    assert.match(url, /order=created_at\.desc/);
+    assert.equal(options.method, undefined);
+    return new Response(JSON.stringify([{
+      id: 'report-from-db',
+      technician: 'Mariana',
+      customer: 'Cliente',
+      phone: '',
+      service_type: 'Inspección',
+      priority: 'Normal',
+      address: 'Localidad',
+      description: 'Revisión',
+      created_at: validReport.createdAt,
+      status: 'abierto'
+    }]), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+
+  const [report] = await listReports();
+  assert.equal(report.id, 'report-from-db');
+  assert.equal(report.serviceType, 'Inspección');
+  assert.equal(report.syncState, 'synced');
+});
+
 test('la API crea reportes una sola vez cuando se repite el mismo identificador', async () => {
-  const server = await startServer({ port: 0, host: '127.0.0.1' });
+  const dataDirectory = await mkdtemp(join(tmpdir(), 'campolisto-test-'));
+  const server = await startServer({ port: 0, host: '127.0.0.1', dataDirectory });
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
   const report = { ...validReport, id: `test-${randomUUID()}` };
 
@@ -64,5 +149,6 @@ test('la API crea reportes una sola vez cuando se repite el mismo identificador'
     assert.equal((await duplicate.json()).id, report.id);
   } finally {
     await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await rm(dataDirectory, { recursive: true, force: true });
   }
 });

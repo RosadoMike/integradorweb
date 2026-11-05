@@ -32,7 +32,7 @@ Abre en el teléfono la URL HTTPS que muestra ngrok. También puedes iniciar un 
 - Manifiesto instalable, modo standalone, colores de tema, iconos estándar de 192 y 512 px, icono SVG y variante maskable.
 - Filtro por estado, búsqueda, resumen de reportes y estados de envío.
 - API REST JSON: `GET /api/health`, `GET /api/reports` y `POST /api/reports`.
-- Almacenamiento de demostración en `data/reports.json`. El servidor crea el directorio y el archivo al guardar el primer reporte.
+- Persistencia local de demostración en `data/reports.json`; en Vercel, los endpoints serverless guardan y consultan Supabase.
 
 ## Pruebas y auditoría
 
@@ -52,26 +52,48 @@ Consulta la [matriz de compatibilidad y la lista de instalación](docs/arquitect
 - Safari en iOS no expone ese evento: instala manualmente con **Compartir → Añadir a pantalla de inicio**. En iOS no se debe depender de Background Sync; CampoListo sincroniza al abrirse, al volver a primer plano/conexión y al pulsar el botón.
 - IndexedDB y cachés pueden ser eliminados por el usuario o por políticas de almacenamiento del navegador. La copia local no sustituye una copia de seguridad del servidor.
 
-## Arquitectura y despliegue
+## Despliegue gratuito en Vercel + Supabase
 
-La justificación comparativa, decisiones, configuración y limitaciones están en [docs/arquitectura.md](docs/arquitectura.md). El proyecto incluye [`render.yaml`](render.yaml) para desplegar el servidor Node en Render con un disco persistente montado en `/opt/render/project/src/data`; la URL pública se sirve con HTTPS gestionado por Render.
+El proyecto usa funciones serverless en `api/` y Supabase como base de datos. Los planes gratuitos están sujetos a límites, suspensión por inactividad, cambios de precio y condiciones de cada proveedor; revisa sus páginas de precios. Vercel no conserva archivos escritos en el disco de sus funciones, así que `data/reports.json` solo funciona con el servidor local de demostración, no es la persistencia del despliegue.
 
-1. Sube el repositorio a GitHub.
-2. En Render, crea un **Blueprint** y conecta ese repositorio; Render detectará `render.yaml`.
-3. Espera a que termine el despliegue y abre la URL HTTPS. Confirma `/api/health`.
-4. Prueba la instalación desde el teléfono y reporta que Safari requiere instalación manual.
+1. Crea un proyecto en Supabase y abre **SQL Editor → New query**. Ejecuta el contenido de [`supabase/schema.sql`](supabase/schema.sql).
+2. En Supabase → **Project Settings → API Keys**, copia el **Project URL** y crea/copia una **Secret key** (`sb_secret_...`). Es secreta: nunca la pongas en `app.js`, en el manifiesto, ni en una variable pública `NEXT_PUBLIC_*`. El backend también acepta la clave legacy `service_role`.
+3. Sube el proyecto a un repositorio de GitHub.
+4. En Vercel, importa ese repositorio como proyecto. No se requiere comando de build ni framework; deja la raíz del proyecto como raíz y el directorio de salida vacío o por defecto.
+5. En **Settings → Environment Variables**, agrega `SUPABASE_URL` y `SUPABASE_SECRET_KEY` para **Production**, **Preview** y **Development** según necesites. Si usas la clave legacy `service_role`, el nombre compatible es `SUPABASE_SERVICE_ROLE_KEY`. La clave solo se usa en las funciones del servidor.
+6. Despliega o vuelve a desplegar después de añadir las variables.
+7. Abre `https://TU-PROYECTO.vercel.app/api/health`; debe responder `{"status":"ok"}`. Luego abre la URL raíz, registra un reporte conectado y verifica `https://TU-PROYECTO.vercel.app/api/reports`.
+8. Prueba desconectar el teléfono después de cargar la app, registrar un reporte y reconectar para verificar que se sincroniza.
 
-El despliegue con archivo JSON está pensado para un prototipo y una sola instancia de servidor. No habilites varias instancias ni lo uses como almacenamiento empresarial compartido: escrituras concurrentes, disponibilidad y recuperación ante desastres requieren una base de datos gestionada y copias de seguridad. Antes de usar datos reales, agrega autenticación, autorización por técnico/empresa, transporte y retención de datos acordes con la política de privacidad, auditoría y protección de datos personales. No se implementa ni simula inicio de sesión.
+Los cambios guardados en GitHub pueden iniciar nuevos despliegues automáticamente. No publiques `.env` ni claves en el repositorio. Si una clave se expone, revócala y genera otra en Supabase.
+
+### Ejecutar localmente
+
+```powershell
+node --version
+npm run dev
+npm test
+```
+
+`npm run dev` inicia un servidor local Node con almacenamiento de demostración en `data/reports.json`; no conecta a Supabase. Para desarrollar contra funciones Vercel localmente, usa Vercel CLI (`vercel dev`) después de enlazar el proyecto y definir las variables de entorno localmente. Nunca compartas el archivo `.env.local`.
+
+### Límites de seguridad del prototipo
+
+Las rutas para crear y listar reportes no implementan autenticación: cualquier persona que conozca la URL pública puede intentar enviar reportes y consultar los existentes. Supabase Row Level Security está habilitado y las funciones usan una clave privilegiada del lado servidor, pero esto no autentica a los usuarios de la app. Usa únicamente datos ficticios para la demostración pública. Antes de trabajar con clientes reales, implementar inicio de sesión, autorización por usuario/empresa, controles antiabuso y una política de privacidad y retención adecuada.
+
+La justificación comparativa y la matriz están en [docs/arquitectura.md](docs/arquitectura.md). Safari en iOS requiere instalación manual desde **Compartir → Añadir a pantalla de inicio**.
 
 ## Estructura
 
 ```text
 app.js                 Interfaz, IndexedDB y sincronización
-server.mjs             Servidor estático y API REST sin dependencias
+server.mjs             Servidor local para pruebas con JSON
+api/                    Funciones serverless de Vercel
+lib/supabase.mjs        Cliente REST de servidor para Supabase
+supabase/schema.sql     Tabla e índices/checks de reportes
 sw.js                  Ciclo de vida y caché offline del shell
 manifest.webmanifest   Configuración de instalación PWA
 icons/                 Iconos PWA SVG y PNG
 docs/arquitectura.md    Reporte técnico y matriz de decisión
 server.test.mjs         Pruebas unitarias de validación de API
-render.yaml             Blueprint de despliegue HTTPS en Render
 ```
