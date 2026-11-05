@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#123c35">
+    <meta name="description" content="Registra y sincroniza reportes de servicio técnico, incluso sin conexión.">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/icons/icon-192.png">
+    <link rel="stylesheet" href="/styles.css">
+    <title>CampoListo | Reportes técnicos</title>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="CampoListo, inicio">
+        <span class="brand-mark" aria-hidden="true">C</span>
+        <span>Campo<span class="brand-light">Listo</span></span>
+      </a>
+      <div class="topbar-actions">
+        <span id="connection-status" class="connection-pill" role="status">
+          <span class="status-dot"></span><span id="connection-label">Conectando...</span>
+        </span>
+        <button id="install-button" class="button button-outline install-button" type="button" hidden>Instalar app</button>
+      </div>
+    </header>
+
+    <main class="page-shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">OPERACIÓN EN CAMPO</p>
+          <h1>Tu trabajo, <span>sin perder conexión.</span></h1>
+          <p class="hero-copy">Levanta reportes desde cualquier lugar. Se guardan en este dispositivo y se sincronizan cuando vuelve el internet.</p>
+        </div>
+        <div class="hero-art" aria-hidden="true">
+          <div class="art-sun"></div><div class="art-hill art-hill-back"></div>
+          <div class="art-hill art-hill-front"></div><div class="art-card"><span>✓</span><i></i><i></i></div>
+        </div>
+      </section>
+
+      <section class="summary-grid" aria-label="Resumen de reportes">
+        <article class="summary-card">
+          <span class="summary-icon icon-total" aria-hidden="true">▤</span>
+          <div><p>Total de reportes</p><strong id="total-count">0</strong></div>
+        </article>
+        <article class="summary-card">
+          <span class="summary-icon icon-pending" aria-hidden="true">↻</span>
+          <div><p>Pendientes de envío</p><strong id="pending-count">0</strong></div>
+        </article>
+        <article class="summary-card">
+          <span class="summary-icon icon-synced" aria-hidden="true">✓</span>
+          <div><p>Enviados al servidor</p><strong id="synced-count">0</strong></div>
+        </article>
+      </section>
+
+      <div class="workspace-grid">
+        <section class="panel form-panel" aria-labelledby="form-title">
+          <div class="panel-heading">
+            <div><p class="eyebrow">NUEVA VISITA</p><h2 id="form-title">Levantar reporte</h2></div>
+            <span class="required-note">* Obligatorio</span>
+          </div>
+          <p class="form-intro">Completa los datos de la visita. Al guardar, el reporte se conserva aunque cierres esta página.</p>
+          <form id="report-form">
+            <div class="field-grid">
+              <label class="field field-wide">Nombre del técnico <span>*</span>
+                <input name="technician" autocomplete="name" maxlength="80" placeholder="Ej. Mariana López" required>
+              </label>
+              <label class="field">Cliente <span>*</span>
+                <input name="customer" maxlength="100" placeholder="Nombre del cliente" required>
+              </label>
+              <label class="field">Teléfono de contacto
+                <input name="phone" type="tel" autocomplete="tel" maxlength="30" placeholder="10 dígitos">
+              </label>
+              <label class="field">Tipo de servicio <span>*</span>
+                <select name="serviceType" required>
+                  <option value="" selected disabled>Selecciona un servicio</option>
+                  <option>Instalación</option><option>Mantenimiento</option>
+                  <option>Reparación</option><option>Inspección</option><option>Otro</option>
+                </select>
+              </label>
+              <label class="field">Prioridad
+                <select name="priority"><option>Normal</option><option>Alta</option><option>Urgente</option></select>
+              </label>
+              <label class="field field-wide">Ubicación o domicilio <span>*</span>
+                <input name="address" autocomplete="street-address" maxlength="180" placeholder="Calle, localidad y referencias" required>
+              </label>
+              <label class="field field-wide">Descripción del trabajo <span>*</span>
+                <textarea name="description" rows="4" maxlength="1500" placeholder="Describe el problema, diagnóstico y trabajo realizado..." required></textarea>
+              </label>
+            </div>
+            <div id="form-message" class="form-message" role="status" aria-live="polite"></div>
+            <button class="button button-primary submit-button" type="submit">
+              <span aria-hidden="true">＋</span> Guardar reporte
+            </button>
+            <p class="privacy-note"><span aria-hidden="true">◈</span> Se guarda primero en tu dispositivo. No pierdes datos si te quedas sin señal.</p>
+          </form>
+        </section>
+
+        <section class="panel reports-panel" aria-labelledby="reports-title">
+          <div class="panel-heading reports-heading">
+            <div><p class="eyebrow">ACTIVIDAD RECIENTE</p><h2 id="reports-title">Mis reportes</h2></div>
+            <button id="sync-button" class="button button-outline sync-button" type="button"><span aria-hidden="true">↻</span> Sincronizar</button>
+          </div>
+          <div class="report-toolbar">
+            <label class="search-box"><span aria-hidden="true">⌕</span><input id="search-input" type="search" placeholder="Buscar reportes..." aria-label="Buscar reportes"></label>
+            <select id="filter-select" class="filter-select" aria-label="Filtrar reportes">
+              <option value="all">Todos</option><option value="pending">Pendientes</option><option value="synced">Enviados</option>
+            </select>
+          </div>
+          <div id="report-list" class="report-list" aria-live="polite"></div>
+          <div id="empty-state" class="empty-state">
+            <span class="empty-icon" aria-hidden="true">▤</span>
+            <h3>Aún no hay reportes</h3>
+            <p>Cuando registres una visita, aparecerá aquí. También puedes hacerlo sin conexión.</p>
+          </div>
+          <p class="list-footer"><span class="status-dot"></span> Los reportes se guardan automáticamente en este dispositivo</p>
+        </section>
+      </div>
+      <footer class="footer"><span>CampoListo</span><span>Diseñada para trabajar en cualquier terreno.</span></footer>
+    </main>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

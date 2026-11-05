@@ -1,0 +1,4 @@
+node_modules/
+data/reports.json
+.env
+.DS_Store
