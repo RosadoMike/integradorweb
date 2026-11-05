@@ -7,6 +7,8 @@ import { join } from 'node:path';
 import { normalizeReport } from './report-validation.mjs';
 import { startServer } from './server.mjs';
 import { listReports, saveReport } from './lib/supabase.mjs';
+import healthHandler from './api/health.mjs';
+import reportsHandler from './api/reports.mjs';
 
 const validReport = {
   id: 'report-1',
@@ -121,6 +123,41 @@ test('el adaptador Supabase transforma las filas consultadas al formato de la ap
   assert.equal(report.id, 'report-from-db');
   assert.equal(report.serviceType, 'Inspección');
   assert.equal(report.syncState, 'synced');
+});
+
+test('las funciones API de Vercel responden con handlers Web estándar', async (context) => {
+  const previousUrl = process.env.SUPABASE_URL;
+  const previousSecretKey = process.env.SUPABASE_SECRET_KEY;
+  const previousServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const previousFetch = globalThis.fetch;
+  process.env.SUPABASE_URL = 'https://campolisto-test.supabase.co';
+  process.env.SUPABASE_SECRET_KEY = 'test-secret';
+  delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+  context.after(() => {
+    if (previousUrl === undefined) delete process.env.SUPABASE_URL;
+    else process.env.SUPABASE_URL = previousUrl;
+    if (previousSecretKey === undefined) delete process.env.SUPABASE_SECRET_KEY;
+    else process.env.SUPABASE_SECRET_KEY = previousSecretKey;
+    if (previousServiceKey === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    else process.env.SUPABASE_SERVICE_ROLE_KEY = previousServiceKey;
+    globalThis.fetch = previousFetch;
+  });
+  globalThis.fetch = async (url, options) => {
+    assert.match(url, /\/rest\/v1\/reports/);
+    assert.equal(options.headers.apikey, 'test-secret');
+    return new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+
+  const healthResponse = await healthHandler(new Request('https://example.test/api/health'));
+  assert.equal(healthResponse.status, 200);
+  assert.deepEqual(await healthResponse.json(), { status: 'ok' });
+
+  const reportsResponse = await reportsHandler(new Request('https://example.test/api/reports'));
+  assert.equal(reportsResponse.status, 200);
+  assert.deepEqual(await reportsResponse.json(), []);
+
+  const methodResponse = await healthHandler(new Request('https://example.test/api/health', { method: 'POST' }));
+  assert.equal(methodResponse.status, 405);
 });
 
 test('la API crea reportes una sola vez cuando se repite el mismo identificador', async () => {

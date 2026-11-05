@@ -3,10 +3,10 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { normalizeReport } from './report-validation.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('.', import.meta.url)));
 const DATA_DIRECTORY = join(ROOT, 'data');
-const REPORTS_FILE = join(DATA_DIRECTORY, 'reports.json');
 const PORT = Number(process.env.PORT ?? 3000);
 const HOST = process.env.HOST ?? '0.0.0.0';
 const MIME_TYPES = new Map([
@@ -19,46 +19,12 @@ const MIME_TYPES = new Map([
   ['.webmanifest', 'application/manifest+json; charset=utf-8']
 ]);
 
-export function normalizeReport(input) {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) {
-    throw new TypeError('El reporte debe ser un objeto.');
-  }
-  const required = ['id', 'technician', 'customer', 'serviceType', 'priority', 'address', 'description', 'createdAt'];
-  for (const field of required) {
-    if (typeof input[field] !== 'string' || input[field].trim() === '') {
-      throw new TypeError(`El campo "${field}" es obligatorio.`);
-    }
-  }
-  const limits = { id: 64, technician: 80, customer: 100, phone: 30, serviceType: 40, priority: 20, address: 180, description: 1500 };
-  for (const [field, maxLength] of Object.entries(limits)) {
-    if (input[field] !== undefined && (typeof input[field] !== 'string' || input[field].length > maxLength)) {
-      throw new TypeError(`El campo "${field}" no es válido (máximo ${maxLength} caracteres).`);
-    }
-  }
-  if (Number.isNaN(Date.parse(input.createdAt))) {
-    throw new TypeError('La fecha del reporte no es válida.');
-  }
-  if (!['Normal', 'Alta', 'Urgente'].includes(input.priority)) {
-    throw new TypeError('La prioridad no es válida.');
-  }
+export { normalizeReport };
 
-  return {
-    id: input.id.trim(),
-    technician: input.technician.trim(),
-    customer: input.customer.trim(),
-    phone: typeof input.phone === 'string' ? input.phone.trim() : '',
-    serviceType: input.serviceType.trim(),
-    priority: input.priority,
-    address: input.address.trim(),
-    description: input.description.trim(),
-    createdAt: new Date(input.createdAt).toISOString(),
-    status: 'abierto'
-  };
-}
-
-async function readReports() {
+async function readReports(dataDirectory) {
+  const reportsFile = join(dataDirectory, 'reports.json');
   try {
-    return JSON.parse(await readFile(REPORTS_FILE, 'utf8'));
+    return JSON.parse(await readFile(reportsFile, 'utf8'));
   } catch (error) {
     if (error.code === 'ENOENT') return [];
     throw error;
@@ -79,14 +45,14 @@ async function readRequestBody(request) {
   return JSON.parse(body);
 }
 
-async function handleApi(request, response, pathname) {
+async function handleApi(request, response, pathname, dataDirectory) {
   if (pathname === '/api/health' && request.method === 'GET') {
     await sendJson(response, 200, { status: 'ok' });
     return true;
   }
   if (pathname !== '/api/reports') return false;
   if (request.method === 'GET') {
-    await sendJson(response, 200, await readReports());
+    await sendJson(response, 200, await readReports(dataDirectory));
     return true;
   }
   if (request.method === 'POST') {
@@ -98,15 +64,15 @@ async function handleApi(request, response, pathname) {
       await sendJson(response, status, { error: error.message });
       return true;
     }
-    const reports = await readReports();
+    const reports = await readReports(dataDirectory);
     const existing = reports.find((saved) => saved.id === report.id);
     if (existing) {
       await sendJson(response, 200, existing);
       return true;
     }
     reports.push(report);
-    await mkdir(DATA_DIRECTORY, { recursive: true });
-    await writeFile(REPORTS_FILE, `${JSON.stringify(reports, null, 2)}\n`, 'utf8');
+    await mkdir(dataDirectory, { recursive: true });
+    await writeFile(join(dataDirectory, 'reports.json'), `${JSON.stringify(reports, null, 2)}\n`, 'utf8');
     await sendJson(response, 201, report);
     return true;
   }
@@ -115,10 +81,10 @@ async function handleApi(request, response, pathname) {
   return true;
 }
 
-async function handleRequest(request, response) {
+async function handleRequest(request, response, dataDirectory) {
   const url = new URL(request.url, `http://${request.headers.host ?? 'localhost'}`);
   if (url.pathname.startsWith('/api/')) {
-    if (await handleApi(request, response, url.pathname)) return;
+    if (await handleApi(request, response, url.pathname, dataDirectory)) return;
     await sendJson(response, 404, { error: 'Ruta de API no encontrada.' });
     return;
   }
@@ -162,9 +128,9 @@ async function handleRequest(request, response) {
   }
 }
 
-export function startServer({ port = PORT, host = HOST } = {}) {
+export function startServer({ port = PORT, host = HOST, dataDirectory = DATA_DIRECTORY } = {}) {
   const server = createServer((request, response) => {
-    handleRequest(request, response).catch((error) => {
+    handleRequest(request, response, dataDirectory).catch((error) => {
       console.error('Error al procesar solicitud:', error);
       if (!response.headersSent) response.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
       response.end(JSON.stringify({ error: 'Error interno del servidor.' }));
