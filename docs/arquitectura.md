@@ -140,7 +140,7 @@ Pasos de preparación:
 4. Añadir `SUPABASE_URL` y `SUPABASE_SECRET_KEY` en las variables de entorno para cada ambiente y desplegar.
 5. Comprobar `/api/health`, guardar un reporte de prueba y consultarlo en `/api/reports`.
 
-Las funciones usan el handler Web estándar de Vercel: reciben `Request` y devuelven `Response`. Si `/api/health` presenta `500 FUNCTION_INVOCATION_FAILED`, revisar el Runtime Log del despliegue para detectar errores al cargar o ejecutar la función.
+Las funciones usan el handler Node de Vercel `(request, response)`. Las solicitudes a Supabase tienen un límite de espera de 10 segundos para evitar que una conexión no disponible deje la función colgada. Si `/api/health` presenta error, revisar el Runtime Log del despliegue.
 
 Los niveles gratuitos tienen cuotas, límites y políticas que pueden cambiar; no prometer disponibilidad/capacidad ilimitadas. Las funciones públicas no implementan autenticación y permiten consultar/crear reportes a cualquiera que tenga la URL. RLS no sustituye autenticación en este diseño porque la API usa una clave privilegiada; usar únicamente datos ficticios hasta añadir autorización.
 

@@ -1,38 +1,41 @@
 import { listReports, saveReport } from '../lib/supabase.mjs';
 
-function jsonResponse(body, status) {
-  return Response.json(body, {
-    status,
-    headers: { 'Cache-Control': 'no-store' }
-  });
+function jsonResponse(response, status, body) {
+  response.statusCode = status;
+  response.setHeader('Content-Type', 'application/json; charset=utf-8');
+  response.setHeader('Cache-Control', 'no-store');
+  response.end(JSON.stringify(body));
 }
 
-export default async function handler(request) {
+export default async function handler(request, response) {
   if (request.method === 'GET') {
     try {
-      return jsonResponse(await listReports(), 200);
+      jsonResponse(response, 200, await listReports());
     } catch (error) {
       console.error('Error al consultar reportes:', error);
       const missingConfiguration = error.message.startsWith('Faltan las variables');
-      return jsonResponse({
+      jsonResponse(response, missingConfiguration ? 503 : 502, {
         error: missingConfiguration ? error.message : 'No se pudieron consultar los reportes.'
-      }, missingConfiguration ? 503 : 502);
+      });
     }
+    return;
   }
 
   if (request.method === 'POST') {
     try {
-      const report = await saveReport(await request.json());
-      return jsonResponse(report, 200);
+      const report = await saveReport(request.body);
+      jsonResponse(response, 200, report);
     } catch (error) {
       const invalid = error instanceof TypeError || error instanceof SyntaxError;
       if (!invalid) console.error('Error al guardar reporte:', error);
       const missingConfiguration = error.message.startsWith('Faltan las variables');
-      return jsonResponse({
+      jsonResponse(response, invalid ? 400 : missingConfiguration ? 503 : 502, {
         error: invalid ? error.message : missingConfiguration ? error.message : 'No se pudo guardar el reporte.'
-      }, invalid ? 400 : missingConfiguration ? 503 : 502);
+      });
     }
+    return;
   }
 
-  return jsonResponse({ error: 'Método no permitido.' }, 405);
+  response.setHeader('Allow', 'GET, POST');
+  jsonResponse(response, 405, { error: 'Método no permitido.' });
 }

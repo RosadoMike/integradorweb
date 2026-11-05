@@ -1,26 +1,28 @@
 import { checkDatabase } from '../lib/supabase.mjs';
 
-function jsonResponse(body, status) {
-  return Response.json(body, {
-    status,
-    headers: { 'Cache-Control': 'no-store' }
-  });
+function jsonResponse(response, status, body) {
+  response.statusCode = status;
+  response.setHeader('Content-Type', 'application/json; charset=utf-8');
+  response.setHeader('Cache-Control', 'no-store');
+  response.end(JSON.stringify(body));
 }
 
-export default async function handler(request) {
+export default async function handler(request, response) {
   if (request.method !== 'GET') {
-    return jsonResponse({ error: 'Método no permitido.' }, 405);
+    response.setHeader('Allow', 'GET');
+    jsonResponse(response, 405, { error: 'Método no permitido.' });
+    return;
   }
 
   try {
     await checkDatabase();
-    return jsonResponse({ status: 'ok' }, 200);
+    jsonResponse(response, 200, { status: 'ok' });
   } catch (error) {
     console.error('La comprobación de Supabase falló:', error);
     const missingConfiguration = error.message.startsWith('Faltan las variables');
-    return jsonResponse({
+    jsonResponse(response, missingConfiguration ? 503 : 502, {
       status: 'error',
       error: missingConfiguration ? error.message : 'La base de datos no está disponible.'
-    }, missingConfiguration ? 503 : 502);
+    });
   }
 }

@@ -67,7 +67,7 @@ El proyecto usa funciones serverless en `api/` y Supabase como base de datos. Lo
 
 Los cambios guardados en GitHub pueden iniciar nuevos despliegues automáticamente. No publiques `.env` ni claves en el repositorio. Si una clave se expone, revócala y genera otra en Supabase.
 
-Si `/api/health` muestra un error `500 FUNCTION_INVOCATION_FAILED`, abre Vercel → proyecto → **Deployments** → despliegue más reciente → **Functions** o **Runtime Logs**, y revisa el error de `/api/health`. Confirma que el último commit esté desplegado y que el proyecto tenga las variables indicadas. Los handlers de `api/` usan la Web Standard `Request`/`Response` de Vercel.
+Si `/api/health` muestra un error, abre Vercel → proyecto → **Logs** o **Deployments** → despliegue más reciente → **Runtime Logs**, y revisa `/api/health`. Confirma que el último commit esté desplegado y que el proyecto tenga las variables indicadas. Las funciones en `api/` usan el formato Node de Vercel `(request, response)`.
 
 ### Ejecutar localmente
 

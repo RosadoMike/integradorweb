@@ -23,6 +23,25 @@ const validReport = {
   status: 'cualquier valor recibido'
 };
 
+function invokeVercelHandler(handler, method, body) {
+  return new Promise((resolve, reject) => {
+    const response = {
+      headers: {},
+      setHeader(name, value) {
+        this.headers[name] = value;
+      },
+      end(value) {
+        resolve({
+          status: this.statusCode,
+          headers: this.headers,
+          body: JSON.parse(value)
+        });
+      }
+    };
+    Promise.resolve(handler({ method, body }, response)).catch(reject);
+  });
+}
+
 test('normaliza reportes válidos y limita el estado a abierto', () => {
   const report = normalizeReport(validReport);
   assert.equal(report.status, 'abierto');
@@ -125,7 +144,7 @@ test('el adaptador Supabase transforma las filas consultadas al formato de la ap
   assert.equal(report.syncState, 'synced');
 });
 
-test('las funciones API de Vercel responden con handlers Web estándar', async (context) => {
+test('las funciones API de Vercel responden usando la firma Node recomendada', async (context) => {
   const previousUrl = process.env.SUPABASE_URL;
   const previousSecretKey = process.env.SUPABASE_SECRET_KEY;
   const previousServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -145,18 +164,20 @@ test('las funciones API de Vercel responden con handlers Web estándar', async (
   globalThis.fetch = async (url, options) => {
     assert.match(url, /\/rest\/v1\/reports/);
     assert.equal(options.headers.apikey, 'test-secret');
+    assert.ok(options.signal instanceof AbortSignal);
     return new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } });
   };
 
-  const healthResponse = await healthHandler(new Request('https://example.test/api/health'));
+  const healthResponse = await invokeVercelHandler(healthHandler, 'GET');
   assert.equal(healthResponse.status, 200);
-  assert.deepEqual(await healthResponse.json(), { status: 'ok' });
+  assert.deepEqual(healthResponse.body, { status: 'ok' });
+  assert.equal(healthResponse.headers['Cache-Control'], 'no-store');
 
-  const reportsResponse = await reportsHandler(new Request('https://example.test/api/reports'));
+  const reportsResponse = await invokeVercelHandler(reportsHandler, 'GET');
   assert.equal(reportsResponse.status, 200);
-  assert.deepEqual(await reportsResponse.json(), []);
+  assert.deepEqual(reportsResponse.body, []);
 
-  const methodResponse = await healthHandler(new Request('https://example.test/api/health', { method: 'POST' }));
+  const methodResponse = await invokeVercelHandler(healthHandler, 'POST');
   assert.equal(methodResponse.status, 405);
 });
 
